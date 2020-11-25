@@ -786,9 +786,7 @@ static const char *snet_prop_key[] = {
 	"ro.debuggable",
 	"ro.secure",
 	"ro.build.type",
-	"ro.build.keys",
 	"ro.build.tags",
-	"ro.system.build.tags",
 	"ro.build.selinux",
 	NULL
 };
@@ -805,9 +803,10 @@ static const char *snet_prop_value[] = {
 	"1",
 	"user",
 	"release-keys",
-	"release-keys",
-	"release-keys",
-	"0",
+        "0", // ro.vendor.boot.warranty_bit
+	"0", // ro.vendor.warranty_bit
+	"locked", // vendor.boot.vbmeta.device_state
+	"green", // vendor.boot.verifiedbootstate
 	NULL
 };
 
