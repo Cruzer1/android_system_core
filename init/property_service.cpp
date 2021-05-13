@@ -108,8 +108,6 @@ struct PropertyAuditData {
     const char* name;
 };
 
-static bool weaken_prop_override_security = false;
-
 static int PropertyAuditCallback(void* data, security_class_t /*cls*/, char* buf, size_t len) {
     auto* d = reinterpret_cast<PropertyAuditData*>(data);
 
@@ -180,8 +178,8 @@ static uint32_t PropertySet(const std::string& name, const std::string& value, s
 
     prop_info* pi = (prop_info*) __system_property_find(name.c_str());
     if (pi != nullptr) {
-        // ro.* properties are actually "write-once", unless the system decides to
-        if (StartsWith(name, "ro.") && !weaken_prop_override_security) {
+        // ro.* properties are actually "write-once".
+        if (StartsWith(name, "ro.")) {
             *error = "Read-only property was already set";
             return PROP_ERROR_READ_ONLY_PROPERTY;
         }
@@ -773,82 +771,6 @@ static void load_override_properties() {
     }
 }
 
-
-/* From Magisk@jni/magiskhide/hide_utils.c */
-static const char *snet_prop_key[] = {
-	"ro.boot.vbmeta.device_state",
-	"ro.boot.verifiedbootstate",
-	"ro.boot.flash.locked",
-	"ro.boot.selinux",
-	"ro.boot.veritymode",
-	"ro.boot.warranty_bit",
-	"ro.warranty_bit",
-	"ro.debuggable",
-	"ro.secure",
-	"ro.build.type",
-	"ro.build.tags",
-	"ro.build.selinux",
-	NULL
-};
-
-static const char *snet_prop_value[] = {
-	"locked",
-	"green",
-	"1",
-	"enforcing",
-	"enforcing",
-	"0",
-	"0",
-	"0",
-	"1",
-	"user",
-	"release-keys",
-        "0", // ro.vendor.boot.warranty_bit
-	"0", // ro.vendor.warranty_bit
-	"locked", // vendor.boot.vbmeta.device_state
-	"green", // vendor.boot.verifiedbootstate
-	NULL
-};
-
-#ifdef TARGET_FORCE_BUILD_FINGERPRINT
-static const char *build_fingerprint_key[] = {
-    "ro.build.fingerprint",
-	"ro.system_ext.build.fingerprint",
-	"ro.vendor.build.fingerprint",
-	"ro.bootimage.build.fingerprint",
-	"ro.odm.build.fingerprint",
-	"ro.product.build.fingerprint",
-	"ro.system.build.fingerprint",
-	NULL
-};
-#endif
-
-static void workaround_snet_properties() {
-    std::string build_type = android::base::GetProperty("ro.build.type", "");
-
-    // Weaken property override security to set safetynet props
-    weaken_prop_override_security = true;
-
-	std::string error;
-
-	// Hide all sensitive props if not eng build
-    if (build_type != "eng") {
-	    LOG(INFO) << "snet: Hiding sensitive props";
-	    for (int i = 0; snet_prop_key[i]; ++i) {
-            PropertySet(snet_prop_key[i], snet_prop_value[i], &error);
-	    }
-    }
-
-    #ifdef TARGET_FORCE_BUILD_FINGERPRINT
-        for (int i = 0; build_fingerprint_key[i]; ++i) {
-            PropertySet(build_fingerprint_key[i], TARGET_FORCE_BUILD_FINGERPRINT, &error);
-        }
-    #endif
-
-    // Restore the normal property override security after safetynet props have been set
-    weaken_prop_override_security = false;
-}
-
 // If the ro.product.[brand|device|manufacturer|model|name] properties have not been explicitly
 // set, derive them from ro.product.${partition}.* properties
 static void property_initialize_ro_product_props() {
@@ -918,7 +840,6 @@ static void property_initialize_ro_product_props() {
     }
 }
 
-#ifndef TARGET_FORCE_BUILD_FINGERPRINT
 // If the ro.build.fingerprint property has not been set, derive it from constituent pieces
 static void property_derive_build_fingerprint() {
     std::string build_fingerprint = GetProperty("ro.build.fingerprint", "");
@@ -952,7 +873,6 @@ static void property_derive_build_fingerprint() {
                    << ")";
     }
 }
-#endif
 
 void PropertyLoadBootDefaults() {
     // TODO(b/117892318): merge prop.default and build.prop files into one
@@ -997,15 +917,9 @@ void PropertyLoadBootDefaults() {
     vendor_load_properties();
 
     property_initialize_ro_product_props();
-
-#ifndef TARGET_FORCE_BUILD_FINGERPRINT
     property_derive_build_fingerprint();
-#endif
 
     update_sys_usb_config();
-
-    // Workaround SafetyNet
-    workaround_snet_properties();
 }
 
 bool LoadPropertyInfoFromFile(const std::string& filename,
@@ -1148,13 +1062,6 @@ static void ProcessKernelCmdline() {
     }
 }
 
-static void SetSafetyNetProps() {
-    InitPropertySet("ro.boot.flash.locked", "1");
-    InitPropertySet("ro.boot.verifiedbootstate", "green");
-    InitPropertySet("ro.boot.veritymode", "enforcing");
-    InitPropertySet("ro.boot.vbmeta.device_state", "locked");
-}
-
 void PropertyInit() {
     selinux_callback cb;
     cb.func_audit = PropertyAuditCallback;
@@ -1168,12 +1075,6 @@ void PropertyInit() {
     if (!property_info_area.LoadDefaultPath()) {
         LOG(FATAL) << "Failed to load serialized property info file";
     }
-
-    // Report a valid verified boot chain to make Google SafetyNet integrity
-    // checks pass. This needs to be done before parsing the kernel cmdline as
-    // these properties are read-only and will be set to invalid values with
-    // androidboot cmdline arguments.
-    SetSafetyNetProps();
 
     // If arguments are passed both on the command line and in DT,
     // properties set in DT always have priority over the command-line ones.
